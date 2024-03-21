@@ -1,0 +1,41 @@
+	LD_LIBRARY_PATH="/home/vishal-pt7528/Desktop/Hash Table testing/Hash table/Hash Table user function/lib/temp"
+
+	LD_LIBRARY_PATH="/usr/local/lib"
+	export LD_LIBRARY_PATH
+
+#  -Wl,-rpath,/usr/local/lib/libclhash
+
+
+ldd my_program
+
+
+
+
+// int key = 3;
+    // void** value  = operationOnHashTable(&key, NULL, hashtable_L, Update);
+    // // free(*value);
+    // // *value = NULL;
+    // displayProbingHashTable(hashtable_L);
+
+    // iterateHashTable(hashtable_L, 7, displayKeyPtr, displayValuePtr);
+
+    
+
+    // // int temp_key = 4;
+    // // operationOnHashTable(&temp_key, NULL, hashtable_L, Delete);
+
+    // // // Deleting Test
+    // // int temp_key_1 = 5;
+    // // operationOnHashTable(&temp_key_1, NULL, hashtable_L, Delete);
+
+
+    // // // Insertion Test
+    // // int temp_key_2 = 2;
+    // // operationOnHashTable(&temp_key_2, NULL, hashtable_L, Insert);
+
+    // // int temp_key_3 = 3;
+    // // operationOnHashTable(&temp_key_3, NULL, hashtable_L, Insert);
+    // // displayProbingHashTable(hashtable_L);
+
+    
+
