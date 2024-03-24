@@ -4,7 +4,6 @@
 #include <time.h>
 #include <errno.h>
 #include <clhash.h>
-#include "./benchmark/clockbenchmark.c"
 #include "HashTable.h"
 
 
