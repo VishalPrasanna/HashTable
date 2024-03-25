@@ -19,6 +19,35 @@
 #define NOT_AVAILABLE_TO_ACCESS '0'
 
 
+typedef struct teacher{
+    unsigned int teacher_id;
+    char* name;
+    unsigned short int age;
+    float attendance;
+    unsigned int phone_no;
+    float salary;
+    unsigned long int account_no;
+    char address[21];
+    struct Student{
+        unsigned int student_id;
+        char* name;
+        unsigned short int age;
+        float attendance;
+        unsigned int phone_no;
+        float cgpa;
+        unsigned int register_no;
+        char* address;
+    } s;
+}Teacher;
+
+static void displayValuePtr(void* value_ptr){
+    Teacher* teacher_value_ptr = (Teacher*)value_ptr;
+    printf("%u %s %hu %f %u %f %lu %s %u %s %hu %f %u %f %u %s....\n", teacher_value_ptr->teacher_id, teacher_value_ptr->name, teacher_value_ptr->age, teacher_value_ptr->attendance,
+                    teacher_value_ptr->phone_no, teacher_value_ptr->salary, teacher_value_ptr->account_no, teacher_value_ptr->address ,
+                    teacher_value_ptr->s.student_id, teacher_value_ptr->s.name, teacher_value_ptr->s.age, teacher_value_ptr->s.attendance, teacher_value_ptr->s.phone_no, teacher_value_ptr->s.cgpa, teacher_value_ptr->s.register_no, teacher_value_ptr->s.address);
+}
+
+
 
 void resizeOrEvict(HashTable* hashtable);
 
@@ -54,11 +83,21 @@ void handleKeyValueWithAction(Action_On_Key_Value action_on_key_value, void* key
         char available_status = AVAILABLE_TO_ACCESS;
         fwrite(&available_status, sizeof(char), 1, hashtable->evicted_file_ptr);
         fwrite(key, hashtable->key_size, 1, hashtable->evicted_file_ptr);
-        hashtable->handleKeyValuePtr(key, value_ptr, action_on_key_value, hashtable); 
+
+        Continue_Memroy* continue_memory = hashtable->handleKeyValuePtr(key, value_ptr, action_on_key_value, hashtable); 
+        fwrite(&continue_memory->cont_size, sizeof(size_t), 1, hashtable->evicted_file_ptr);
+        fwrite(continue_memory->cont_mem_ptr, continue_memory->cont_size, 1, hashtable->evicted_file_ptr);
+        free(continue_memory->cont_mem_ptr);
+        free(continue_memory);
+
         add_value_bloom_filter(hashtable->bloom_flt, key, hashtable->key_size);
     }
     else if(action_on_key_value == SaveToFileAndFreeMemory){
-        hashtable->handleKeyValuePtr(key, value_ptr, action_on_key_value, hashtable);  
+        Continue_Memroy* continue_memory = hashtable->handleKeyValuePtr(key, value_ptr, action_on_key_value, hashtable); 
+        fwrite(&continue_memory->cont_size, sizeof(size_t), 1, hashtable->file_ptr);
+        fwrite(continue_memory->cont_mem_ptr, continue_memory->cont_size, 1, hashtable->file_ptr);
+        free(continue_memory->cont_mem_ptr);
+        free(continue_memory); 
     }
     else if(action_on_key_value == FreeMemory){
         hashtable->handleKeyValuePtr(key, value_ptr, action_on_key_value, NULL);
@@ -66,7 +105,7 @@ void handleKeyValueWithAction(Action_On_Key_Value action_on_key_value, void* key
 }
 
 
-HashTable* setupHashTable(unsigned int initial_size, unsigned int max_ht_size_limit, size_t key_size, void (*handleKeyValuePtr) (void* key, void* value_ptr, Action_On_Key_Value action_on_key_value, HashTable* hashtable), Pair* generateKeyValuePtr(size_t key_size, FILE* file_ptr), char* filepath, uint64_t (*hashFunction) (void* value, size_t size), CollisionHandling collision_handling, char file_format){
+HashTable* setupHashTable(unsigned int initial_size, unsigned int max_ht_size_limit, size_t key_size, Continue_Memroy* (*handleKeyValuePtr) (void* key, void* value_ptr, Action_On_Key_Value action_on_key_value, HashTable* hashtable), Pair* generateKeyValuePtr(size_t key_size, FILE* file_ptr), char* filepath, uint64_t (*hashFunction) (void* value, size_t size), CollisionHandling collision_handling){
 
     HashTable* hashtable = (HashTable*)calloc(1, sizeof(HashTable));
 
@@ -93,20 +132,13 @@ HashTable* setupHashTable(unsigned int initial_size, unsigned int max_ht_size_li
     bloom_filter_init(hashtable->bloom_flt, hashtable->current_bloom_filter_size, 0.05, multiHashing);
     
 
-    hashtable->file_format = file_format;
 
-    hashtable->filepath = (char*)calloc(1, strlen(filepath)+ 5);
+    hashtable->filepath = (char*)calloc(1, strlen(filepath)+ 1);
     strcpy(hashtable->filepath, filepath);
 
-    char* local_fileName = (char*)calloc(100, strlen(filepath) + 10);
+    char* local_fileName = (char*)calloc(1, strlen(filepath) + 5);
     strcat(local_fileName, filepath);
-
-    if(file_format == 'T'){
-        strcat(local_fileName, ".txt");
-    }
-    else if(file_format == 'B'){
-        strcat(local_fileName, ".bin");
-    }
+    strcat(local_fileName, ".bin");
 
     hashtable->file_ptr = fopen(local_fileName, "wb+");
     free(local_fileName);
@@ -119,14 +151,8 @@ HashTable* setupHashTable(unsigned int initial_size, unsigned int max_ht_size_li
 
     unsigned int total_element = hashtable->no_element_ht + hashtable->no_evicted_element - hashtable->no_evicted_element_removed;
     
-    if(hashtable->file_format == 'T'){
-        fprintf(hashtable->file_ptr, "%20zu ", hashtable->key_size);
-        fprintf(hashtable->file_ptr, "%11u ", total_element);  
-    }
-    else if(hashtable->file_format == 'B'){
-        fwrite(&hashtable->key_size, sizeof(size_t), 1, hashtable->file_ptr);
-        fwrite(&total_element, sizeof(unsigned int), 1, hashtable->file_ptr);  
-    }
+    fwrite(&hashtable->key_size, sizeof(size_t), 1, hashtable->file_ptr);
+    fwrite(&total_element, sizeof(unsigned int), 1, hashtable->file_ptr);  
 
     // printf("Setup Successfulle\n");
     return hashtable;
@@ -177,30 +203,18 @@ void closeHashTable(int hashtableN, ...){
             if(available_status == EOF || (available_status != AVAILABLE_TO_ACCESS && available_status != NOT_AVAILABLE_TO_ACCESS)){
                 break;
             }
-            void* key_in_file = calloc(1, hashtable->key_size);
-            fread(key_in_file , hashtable->key_size, 1, evicted_file_ptr);
 
-            int keye = *(int*)key_in_file;
+            fseek(evicted_file_ptr, hashtable->key_size, SEEK_CUR);
+
             size_t total_store_size = 0;
-            if(hashtable->file_format == 'T'){
-                fscanf(evicted_file_ptr, "%zu ", &total_store_size);
-            }
-            else if(hashtable->file_format == 'B'){
-                fread(&total_store_size, sizeof(size_t), 1, evicted_file_ptr);
-            }
+
+            fread(&total_store_size, sizeof(size_t), 1, evicted_file_ptr);
+
             if(available_status == AVAILABLE_TO_ACCESS){
                 char* tranporting_buf;
-                if(hashtable->file_format == 'T'){
-                    fprintf(hashtable->file_ptr, "%20zu ", total_store_size);
-                    tranporting_buf = (char*)calloc(1, total_store_size + 1);
-                    
-                    fgets(tranporting_buf, total_store_size + 1, evicted_file_ptr);
-                }
-                else if(hashtable->file_format == 'B'){    
-                    fwrite(&total_store_size, sizeof(size_t), 1, hashtable->file_ptr);
-                    tranporting_buf = (char*)calloc(1, total_store_size);
-                    fread(tranporting_buf, total_store_size, 1, evicted_file_ptr);
-                }
+                fwrite(&total_store_size, sizeof(size_t), 1, hashtable->file_ptr);
+                tranporting_buf = (char*)calloc(1, total_store_size);
+                fread(tranporting_buf, total_store_size, 1, evicted_file_ptr);
                 fwrite(tranporting_buf, total_store_size, 1, hashtable->file_ptr);
                 total_element += 1;
                 free(tranporting_buf);
@@ -208,20 +222,12 @@ void closeHashTable(int hashtableN, ...){
             else{
                 fseek(evicted_file_ptr, total_store_size, SEEK_CUR);
             }
-            free(key_in_file);
         }
-
 
         fseek(hashtable->file_ptr, 0, SEEK_SET);
 
-        if(hashtable->file_format == 'T'){
-            fprintf(hashtable->file_ptr, "%20zu ", hashtable->key_size);
-            fprintf(hashtable->file_ptr, "%11u ", total_element);  
-        }
-        else if(hashtable->file_format == 'B'){
-            fwrite(&hashtable->key_size, sizeof(size_t), 1, hashtable->file_ptr);
-            fwrite(&total_element, sizeof(unsigned int), 1, hashtable->file_ptr);  
-        }
+        fwrite(&hashtable->key_size, sizeof(size_t), 1, hashtable->file_ptr);
+        fwrite(&total_element, sizeof(unsigned int), 1, hashtable->file_ptr);  
 
 
         free_bloom_filter(hashtable->bloom_flt);
@@ -230,14 +236,13 @@ void closeHashTable(int hashtableN, ...){
         free(hashtable->filepath);
         fclose(hashtable->file_ptr);
         fclose(hashtable->evicted_file_ptr);
-        remove(hashtable->eviction_fileName);
+        // remove(hashtable->eviction_fileName);
         free(hashtable->eviction_fileName);
         free(hashtable);
         hashtable = NULL;
     }
     va_end(hashtable_arr);
 }
-
 
 uint64_t defaultHashFunction(void* value, size_t size){
     void * random =  get_random_key_for_clhash(UINT64_C(0x23a23cf5033c3c81),UINT64_C(0xb3816f6a2c68e530));
@@ -311,9 +316,9 @@ void* finding(HashTable* hashtable, void* key, unsigned int hash_key){
                 index_bucket->access_count += 1;
                 return index_bucket;
             }
-
             index_bucket = index_bucket->nextNode;
         }
+        return NULL;
     }
     else if(hashtable->collision_handling != Chaining){
         unsigned int iterate_hash_key = hash_key;
@@ -495,7 +500,7 @@ bool deletion(HashTable* hashtable, void* key, unsigned int hash_key, bool memor
                 indexed_bucket->nextNode = next_bucket_node->nextNode;
                 if(memory_free == FREE_AFTER_DELETE){
                     free(next_bucket_node->key);
-                    handleKeyValueWithAction(FreeMemory, NULL, indexed_bucket->value, hashtable);
+                    handleKeyValueWithAction(FreeMemory, NULL, next_bucket_node->value, hashtable);
                     free(next_bucket_node);
                 }
                 hashtable->no_element_ht -= 1;
@@ -524,33 +529,6 @@ void* update(HashTable* hashtable, Bucket* bucket, unsigned int hash_key){
 }
 
 
-typedef struct teacher{
-    unsigned int teacher_id;
-    char* name;
-    unsigned short int age;
-    float attendance;
-    unsigned int phone_no;
-    float salary;
-    unsigned long int account_no;
-    char address[21];
-    struct Student{
-        unsigned int student_id;
-        char* name;
-        unsigned short int age;
-        float attendance;
-        unsigned int phone_no;
-        float cgpa;
-        unsigned int register_no;
-        char* address;
-    } s;
-}Teacher;
-
-static void displayValuePtr(void* value_ptr){
-    Teacher* teacher_value_ptr = (Teacher*)value_ptr;
-    printf("%u %s %hu %f %u %f %lu %s %u %s %hu %f %u %f %u %s....", teacher_value_ptr->teacher_id, teacher_value_ptr->name, teacher_value_ptr->age, teacher_value_ptr->attendance,
-                    teacher_value_ptr->phone_no, teacher_value_ptr->salary, teacher_value_ptr->account_no, teacher_value_ptr->address ,
-                    teacher_value_ptr->s.student_id, teacher_value_ptr->s.name, teacher_value_ptr->s.age, teacher_value_ptr->s.attendance, teacher_value_ptr->s.phone_no, teacher_value_ptr->s.cgpa, teacher_value_ptr->s.register_no, teacher_value_ptr->s.address);
-}
 
 
 bool operationOnEvictedFile(HashTable* hashtable, void* key, Operation operation){
@@ -594,13 +572,7 @@ bool operationOnEvictedFile(HashTable* hashtable, void* key, Operation operation
 
         free(key_in_file);
         size_t total_store_size;
-
-        if(hashtable->file_format == 'T'){
-            fscanf(evicted_file, "%zu ", &total_store_size);
-        }
-        else if(hashtable->file_format == 'B'){
-            fread(&total_store_size, sizeof(size_t), 1, evicted_file);
-        }
+        fread(&total_store_size, sizeof(size_t), 1, evicted_file);
         fseek(evicted_file, total_store_size, SEEK_CUR);
     }
     // printf("hello");
@@ -853,34 +825,22 @@ void refreshingEvictionFileBloomFlt(HashTable* hashtable){
         if(available_status == EOF || (available_status != AVAILABLE_TO_ACCESS && available_status != NOT_AVAILABLE_TO_ACCESS)){
             break;
         }
+
         void* key_in_file = calloc(1, hashtable->key_size);
         fread(key_in_file , hashtable->key_size, 1, evicted_file_ptr);
         size_t total_store_size = 0;
 
-        if(hashtable->file_format == 'T'){
-            fscanf(evicted_file_ptr, "%zu ", &total_store_size);
-        }
-        else if(hashtable->file_format == 'B'){
-            fread(&total_store_size, sizeof(size_t), 1, evicted_file_ptr);
-        }
+        fread(&total_store_size, sizeof(size_t), 1, evicted_file_ptr);
 
         if(available_status == AVAILABLE_TO_ACCESS){
             hashtable->no_evicted_element += 1;
             add_value_bloom_filter(hashtable->bloom_flt, key_in_file, hashtable->key_size);
-
             fwrite(&available_status, sizeof(char), 1, temp_file_ptr);
             fwrite(key_in_file, hashtable->key_size, 1, temp_file_ptr);
             char* tranporting_buf;
-            if(hashtable->file_format == 'T'){
-                fprintf(temp_file_ptr, "%20zu ", total_store_size);
-                tranporting_buf = (char*)calloc(1, total_store_size + 1);
-                fgets(tranporting_buf, total_store_size + 1, evicted_file_ptr);
-            }
-            else if(hashtable->file_format == 'B'){    
-                fwrite(&total_store_size, sizeof(size_t), 1, temp_file_ptr);
-                tranporting_buf = (char*)calloc(1, total_store_size);
-                fread(tranporting_buf, total_store_size, 1, evicted_file_ptr);
-            }
+            fwrite(&total_store_size, sizeof(size_t), 1, temp_file_ptr);
+            tranporting_buf = (char*)calloc(1, total_store_size);
+            fread(tranporting_buf, total_store_size, 1, evicted_file_ptr);
             fwrite(tranporting_buf, total_store_size, 1, temp_file_ptr);
             free(tranporting_buf);
         }
@@ -890,8 +850,8 @@ void refreshingEvictionFileBloomFlt(HashTable* hashtable){
         free(key_in_file);
     }   
     fclose(hashtable->evicted_file_ptr);
-    hashtable->evicted_file_ptr = temp_file_ptr;
     remove(hashtable->eviction_fileName);
+    hashtable->evicted_file_ptr = temp_file_ptr;
     rename(new_temp_file_name, hashtable->eviction_fileName);
     free(new_temp_file_name);
 }
@@ -967,30 +927,22 @@ void* operationOnHashTable(void* key, void* value, HashTable* hashtable, Operati
     return return_ptr;
 }
 
-HashTable* generateHashTableWithFile(char* file, Pair* (*generateKeyValuePtrFromFile)(size_t key_size, FILE* file_ptr), char file_format, unsigned int initial_size, unsigned int max_ht_size_limit, void (*handleKeyValuePtr) (void* key, void* value_ptr, Action_On_Key_Value action_on_key_value, HashTable* hashtable), Pair* (*generateKeyValuePtr)(size_t key_size, FILE* file_ptr), char* newFileName, uint64_t (*hashFunction) (void* value, size_t size), CollisionHandling collision_handling, char new_format){
+HashTable* generateHashTableWithFile(char* file, Pair* (*generateKeyValuePtrFromFile)(size_t key_size, FILE* file_ptr), unsigned int initial_size, unsigned int max_ht_size_limit, Continue_Memroy* (*handleKeyValuePtr) (void* key, void* value_ptr, Action_On_Key_Value action_on_key_value, HashTable* hashtable), Pair* (*generateKeyValuePtr)(size_t key_size, FILE* file_ptr), char* newFileName, uint64_t (*hashFunction) (void* value, size_t size), CollisionHandling collision_handling){
     
     FILE* file_ptr = fopen(file, "rb");
-
     size_t key_size = 0;
 
     unsigned int total_elements = 0;
 
-    if(file_format == 'T'){
-        fscanf(file_ptr, "%zu ", &key_size);
-        fscanf(file_ptr, "%u ", &total_elements);
-    }
-    else if(file_format == 'B'){
-        fread(&key_size, sizeof(size_t), 1, file_ptr);
-        fread(&total_elements, sizeof(unsigned int), 1, file_ptr);
-    }
+    fread(&key_size, sizeof(size_t), 1, file_ptr);
+    fread(&total_elements, sizeof(unsigned int), 1, file_ptr);
 
-    printf("%zu %u. \n", key_size, total_elements);
-    HashTable* hashtable = setupHashTable(initial_size, max_ht_size_limit, key_size, handleKeyValuePtr, generateKeyValuePtr, newFileName, NULL, collision_handling, new_format);
+    // printf("%zu %u. \n", key_size, total_elements);
+    HashTable* hashtable = setupHashTable(initial_size, max_ht_size_limit, key_size, handleKeyValuePtr, generateKeyValuePtr, newFileName, NULL, collision_handling);
 
     for(int i = 0; i < total_elements; i++){       
         Pair* pair = generateKeyValuePtrFromFile(key_size, file_ptr);
-        // printf("%p ", value_ptr);
-        // printf("%d ", *(int*)pair->key);
+        // printf("%u ", *(unsigned int*)pair->key);
         // displayValuePtr(pair->value_ptr);
         // printf("\n");
         operationOnHashTable(pair->key, pair->value_ptr, hashtable, Insert);

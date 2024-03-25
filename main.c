@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <clhash.h>
 #include "HashTable.h"
+#include <unistd.h>
 
 
 void displayChainingHashTable(HashTable* hashtable){
@@ -202,7 +203,7 @@ Pair* generateKeyValuePtrWithTxt(size_t key_size, FILE* file_ptr){
     return pair;
 }
 
-Pair* generateKeyValuePtrWithBin(size_t key_size, FILE* file_ptr){
+Pair* generateKeyValuePtr(size_t key_size, FILE* file_ptr){
     
     Teacher* teacher_value_ptr = calloc(1, sizeof(Teacher));
 
@@ -215,6 +216,7 @@ Pair* generateKeyValuePtrWithBin(size_t key_size, FILE* file_ptr){
 
     void* key = calloc(1, key_size);
     fread(key, key_size, 1, file_ptr);
+
     fread(&teacher_value_ptr->teacher_id, sizeof(unsigned int), 1, file_ptr);
 
     while (1){
@@ -250,7 +252,7 @@ Pair* generateKeyValuePtrWithBin(size_t key_size, FILE* file_ptr){
     }
 
     char* s_name_sure_ptr =  malloc(indexing_sure_ptr);
-    memcpy(t_name_sure_ptr, unsure_ptr, indexing_sure_ptr);
+    memcpy(s_name_sure_ptr, unsure_ptr, indexing_sure_ptr);
     free(unsure_ptr);
     unsure_ptr = NULL;
     unsure_size -= indexing_sure_ptr;
@@ -386,10 +388,11 @@ void handleKeyValuePtrWithBin(void* key, void* value_ptr, Action_On_Key_Value ac
 }
 
 
-void handleKeyValuePtr(void* key, void* value_ptr, Action_On_Key_Value action_on_key_value, HashTable* hashtable){
+Continue_Memroy* handleKeyValuePtr(void* key, void* value_ptr, Action_On_Key_Value action_on_key_value, HashTable* hashtable){
 
     Teacher* teacher_value_ptr = value_ptr;
-    
+    Continue_Memroy* continue_memory = NULL;
+
     if(action_on_key_value == SaveToEvictionFile || action_on_key_value == SaveToFileAndFreeMemory){
 
         size_t total_dt_size_cont_mem = 0;
@@ -399,10 +402,8 @@ void handleKeyValuePtr(void* key, void* value_ptr, Action_On_Key_Value action_on
         size_t size_of_s_address = strlen(teacher_value_ptr->s.address)+1;
         total_dt_size_cont_mem += (size_of_t_name + size_of_s_name + size_of_s_address);
 
-        void* cont_mem_ptr = calloc(1, total_dt_size_cont_mem);
+        char* cont_mem_ptr = calloc(1, total_dt_size_cont_mem);
         void* cpy_cont_mem_ptr = cont_mem_ptr;
-        memcpy(cont_mem_ptr, &total_dt_size_cont_mem, sizeof(size_t));
-        cont_mem_ptr += sizeof(size_t);
 
         memcpy(cont_mem_ptr, key, hashtable->key_size);
         cont_mem_ptr += hashtable->key_size;
@@ -455,6 +456,9 @@ void handleKeyValuePtr(void* key, void* value_ptr, Action_On_Key_Value action_on
         memcpy(cont_mem_ptr, teacher_value_ptr->s.address, size_of_s_address);
         cont_mem_ptr += size_of_s_address;
 
+        continue_memory = (Continue_Memroy*) calloc(1, sizeof(Continue_Memroy));
+        continue_memory->cont_size = total_dt_size_cont_mem;
+        continue_memory->cont_mem_ptr = cpy_cont_mem_ptr;
     }
 
     if(action_on_key_value == FreeMemory || action_on_key_value == SaveToFileAndFreeMemory){
@@ -464,6 +468,7 @@ void handleKeyValuePtr(void* key, void* value_ptr, Action_On_Key_Value action_on
         free(teacher_value_ptr);
         value_ptr = NULL;
     }
+    return continue_memory;
 }
 
 
@@ -471,34 +476,52 @@ int main(){
 
     clock_t start = clock();
 
-    CollisionHandling collision_handling = 1;
-    unsigned int no_of_operation = 10000;
+    CollisionHandling collision_handling = 4;
+    unsigned int no_of_operation = 100000;
     unsigned int  table_size_limit = 1000;
 
     Collision ar_opr[4], opr_analysis = {0, 0, 0, 0};
     unsigned int other_collision = 0;
 
-        FILE* random_file_ptr = fopen("./files/RandomData.txt", "r");
-        FILE* file_ptr = fopen("./files/Data.txt", "r");
 
-        HashTable* hashtable = setupHashTable(0, table_size_limit, sizeof(unsigned int), handleKeyValuePtrWithBin, generateKeyValuePtrWithBin, "./files/benchmarkelements", NULL, collision_handling, 'T');
+    FILE* random_file_ptr = fopen("./files/RandomData.txt", "r");
+    
+    FILE* file_ptr = fopen("./files/Data.txt", "r");
+
+    HashTable* hashtable = setupHashTable(0, table_size_limit, sizeof(unsigned int), handleKeyValuePtr, generateKeyValuePtr, "./files/ElementsHt", NULL, collision_handling);
         
-        for(unsigned int i = 0; i < 20000; i++){
-            void* value_ptr = generateValuePtrInitial(file_ptr);
-            operationOnHashTable(&i, value_ptr, hashtable, Insert);
+    for(unsigned int i = 0; i < 10000; i++){
+        void* value_ptr = generateValuePtrInitial(file_ptr);
+        // displayValuePtr(value_ptr);
+        operationOnHashTable(&i, value_ptr, hashtable, Insert);
+    }
+
+    for(unsigned int i = 0; i < no_of_operation; i++){
+        unsigned int seq_key, random_key, random_opr;
+        fscanf(random_file_ptr, "%u %u %u\n", &seq_key, &random_key, &random_opr);
+        int key = random_key;
+        Operation opr = (Operation)random_opr;
+        if(opr == Insert || opr == Update){
+                void* value_ptr = generateValuePtrInitial(file_ptr);
+                operationOnHashTable(&key, value_ptr, hashtable, opr);
         }
-
-        for(unsigned int i = 0; i < 5000; i++){
-            printf("%d \n", i);
-            operationOnHashTable(&i, NULL, hashtable, Delete);
+        else if(opr == Delete || opr == Read){
+                operationOnHashTable(&key, NULL, hashtable, opr);
         }
+    }
 
 
-        other_collision = hashtable->other_collision;
+    other_collision = hashtable->other_collision;
         
-        closeHashTable(1, hashtable);
-        fclose(random_file_ptr);
-        fclose(file_ptr);
+    closeHashTable(1, hashtable);
+    fclose(random_file_ptr);
+    fclose(file_ptr);
+
+
+    HashTable* hashtable_RL = generateHashTableWithFile("./files/ElementsHt.bin", generateKeyValuePtr, 0, 1000000, handleKeyValuePtr, generateKeyValuePtr, "./files/NewElementHt", NULL, Linear);
+    unsigned int total_elements = hashtable_RL->no_element_ht;
+    printf("%u ", total_elements);
+    closeHashTable(1, hashtable_RL);
 
     printf("\n%f\n", ((double)(clock() - start))/ CLOCKS_PER_SEC);
 
