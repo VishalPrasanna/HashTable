@@ -474,6 +474,7 @@ Continue_Memroy* handleKeyValuePtr(void* key, void* value_ptr, Action_On_Key_Val
 
 int main(){
 
+    prinf("Hello World");
     clock_t start = clock();
 
     CollisionHandling collision_handling = 4;
